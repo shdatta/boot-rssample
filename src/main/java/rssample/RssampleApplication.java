@@ -5,6 +5,9 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.cxf.bus.spring.SpringBus;
 import org.apache.cxf.endpoint.Server;
 import org.apache.cxf.jaxrs.JAXRSServerFactoryBean;
+import org.apache.cxf.jaxrs.client.JAXRSClientFactory;
+import org.apache.cxf.jaxrs.client.JAXRSClientFactoryBean;
+import org.apache.cxf.jaxrs.client.WebClient;
 import org.apache.cxf.jaxrs.lifecycle.ResourceProvider;
 import org.apache.cxf.jaxrs.spring.SpringResourceFactory;
 import org.apache.cxf.transport.servlet.CXFServlet;
@@ -22,9 +25,11 @@ import org.springframework.boot.context.embedded.tomcat.TomcatEmbeddedServletCon
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ImportResource;
+import rssample.Interceptors.LogClientOutRestInterceptor;
+import rssample.Interceptors.LogInRestInterceptor;
+import rssample.clientInterfaces.testResource;
 
 import javax.ws.rs.Path;
-import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -43,6 +48,12 @@ public class RssampleApplication {
     @Value("${cxf.log.requests:false}")
     private boolean logRequests;
 
+    @Autowired
+    private LogInRestInterceptor logInRestInterceptor;
+
+    @Autowired
+    private LogClientOutRestInterceptor logClientOutRestInterceptor;
+
     public static void main(String[] args) {
         SpringApplication.run(RssampleApplication.class, args);
     }
@@ -57,6 +68,8 @@ public class RssampleApplication {
         List<ResourceProvider> resourceProviders = new LinkedList<ResourceProvider>();
         for (String beanName : ctx.getBeanDefinitionNames()) {
             if (ctx.findAnnotationOnBean(beanName, Path.class) != null) {
+                if (beanName.equals("myClient") || beanName.equals("otherClient"))
+                    continue;
                 SpringResourceFactory factory = new SpringResourceFactory(beanName);
                 factory.setApplicationContext(ctx);
                 resourceProviders.add(factory);
@@ -65,14 +78,32 @@ public class RssampleApplication {
         if (resourceProviders.size() > 0) {
             JAXRSServerFactoryBean factory = new JAXRSServerFactoryBean();
             factory.setBus(ctx.getBean(SpringBus.class));
-            factory.setProviders(Arrays.asList(new JacksonJsonProvider()));
+//            factory.setProviders(Arrays.asList(new JacksonJsonProvider()));
             factory.setResourceProviders(resourceProviders);
+            factory.getInInterceptors().add(logInRestInterceptor);
             factory.setAddress("/");
             return factory.create();
 
         } else {
             return null;
         }
+    }
+
+    @Bean(name="myClient")
+    public testResource myClient(){
+        testResource tr =  JAXRSClientFactory.create("https://www.google.com", testResource.class);
+        WebClient.client(tr).getHeaders().putSingle("Hello", "hello");
+        return tr;
+    }
+
+    @Bean(name="otherClient")
+    public testResource otherClient(){
+        JAXRSClientFactoryBean factoryBean = new JAXRSClientFactoryBean();
+        factoryBean.setServiceClass(testResource.class);
+        factoryBean.setAddress("https://www.google.com");
+        factoryBean.setThreadSafe(true);
+        factoryBean.getOutInterceptors().add(logClientOutRestInterceptor);
+        return factoryBean.create(testResource.class);
     }
 
     @Bean
